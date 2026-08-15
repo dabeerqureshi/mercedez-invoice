@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv312/
+venv/
+
+# App runtime data
+mercedes_invoice/mercedes_invoice.db
+mercedes_invoice/mercedes_browser/
+mercedes_invoice/network_log.jsonl
+Invoices/
+
+# Packaging
+build/
+dist/
+*.spec
+
+# OS
+.DS_Store
