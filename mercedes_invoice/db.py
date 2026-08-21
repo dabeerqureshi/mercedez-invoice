@@ -46,6 +46,16 @@ def init_db() -> None:
                 created_at      TEXT,
                 FOREIGN KEY (customer_id) REFERENCES customers (id)
             );
+            CREATE TABLE IF NOT EXISTS work_items (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id  INTEGER NOT NULL,
+                description TEXT NOT NULL,
+                oper_no     TEXT,
+                time_hours  TEXT,
+                labour_cost REAL NOT NULL DEFAULT 0,
+                position    INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (invoice_id) REFERENCES invoices (id)
+            );
             CREATE TABLE IF NOT EXISTS invoice_items (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 invoice_id          INTEGER NOT NULL,
@@ -72,6 +82,11 @@ def _migrate(con: sqlite3.Connection) -> None:
     cols = {r["name"] for r in con.execute("PRAGMA table_info(invoice_items)")}
     if "designation" not in cols:
         con.execute("ALTER TABLE invoice_items ADD COLUMN designation TEXT")
+
+    inv_cols = {r["name"] for r in con.execute("PRAGMA table_info(invoices)")}
+    for name in ("make", "model", "reg_no", "mileage"):
+        if name not in inv_cols:
+            con.execute(f"ALTER TABLE invoices ADD COLUMN {name} TEXT")
     con.commit()
 
 
@@ -102,16 +117,20 @@ def _get_or_create_customer(con, name, email, phone):
     return cur.lastrowid
 
 
-def save_invoice(customer, items, subtotal, vat, discount, total, currency):
+def save_invoice(customer, items, subtotal, vat, discount, total, currency,
+                 vehicle=None, work_items=None):
     """Persist an invoice plus its frozen line items.
 
     Args:
-        customer: dict with keys name/email/phone (may be empty name -> None)
-        items:    list of dicts with keys part_number, quantity, unit_price,
-                  line_total, vat, discount, price_retrieved_at
+        customer:   dict with keys name/email/phone (may be empty name -> None)
+        items:      list of dicts with keys part_number, quantity, unit_price,
+                    line_total, vat, discount, price_retrieved_at
+        vehicle:    optional dict make/model/reg_no/mileage
+        work_items: optional list of dicts description / oper_no / time_hours /
+                    labour_cost (the "Description of Work" section)
 
     Returns:
-        A dict {invoice, customer, items} via get_invoice(), or raises.
+        A dict {invoice, customer, items, work_items} via get_invoice().
     """
     con = _connect()
     try:
@@ -120,10 +139,19 @@ def save_invoice(customer, items, subtotal, vat, discount, total, currency):
         )
         invoice_number = _next_invoice_number(con)
         now = datetime.datetime.now().isoformat(timespec="seconds")
+        vehicle = vehicle or {}
         cur = con.execute(
             "INSERT INTO invoices (invoice_number, customer_id, subtotal, vat, "
-            "discount, total, currency, created_at) VALUES (?,?,?,?,?,?,?,?)",
-            (invoice_number, customer_id, subtotal, vat, discount, total, currency, now),
+            "discount, total, currency, created_at, make, model, reg_no, mileage) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                invoice_number, customer_id, subtotal, vat, discount, total,
+                currency, now,
+                vehicle.get("make") or None,
+                vehicle.get("model") or None,
+                vehicle.get("reg_no") or None,
+                vehicle.get("mileage") or None,
+            ),
         )
         invoice_id = cur.lastrowid
         for it in items:
@@ -141,6 +169,21 @@ def save_invoice(customer, items, subtotal, vat, discount, total, currency):
                     it["vat"],
                     it["discount"],
                     it["price_retrieved_at"],
+                ),
+            )
+        for pos, w in enumerate(work_items or []):
+            if not (w.get("description") or "").strip():
+                continue
+            con.execute(
+                "INSERT INTO work_items (invoice_id, description, oper_no, "
+                "time_hours, labour_cost, position) VALUES (?,?,?,?,?,?)",
+                (
+                    invoice_id,
+                    w["description"].strip(),
+                    (w.get("oper_no") or "").strip() or None,
+                    (w.get("time_hours") or "").strip() or None,
+                    round(float(w.get("labour_cost") or 0), 2),
+                    pos,
                 ),
             )
         con.commit()
@@ -163,9 +206,14 @@ def get_invoice(invoice_number):
                 "SELECT * FROM customers WHERE id=?", (inv["customer_id"],)
             ).fetchone()
         items = con.execute(
-            "SELECT * FROM invoice_items WHERE invoice_id=?", (inv["id"],)
+            "SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id", (inv["id"],)
         ).fetchall()
-        return {"invoice": inv, "customer": customer, "items": items}
+        work = con.execute(
+            "SELECT * FROM work_items WHERE invoice_id=? ORDER BY position, id",
+            (inv["id"],),
+        ).fetchall()
+        return {"invoice": inv, "customer": customer, "items": items,
+                "work_items": work}
     finally:
         con.close()
 

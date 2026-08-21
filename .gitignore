@@ -7,7 +7,62 @@ venv/
 
 # App runtime data
 mercedes_invoice/mercedes_invoice.db
+mercedes_invoice/mercedes_invoice.db-*
 mercedes_invoice/mercedes_browser/
+Invoices/
+logs/
+*.log
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build & Packaging
+build/
+dist/
+MercedesInvoice/
+*.egg-info/
+*.msi
+*.exe
+*.spec~
+
+# Configuration & Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+_tmp_*.py
+*.bak
+*.backup
+*_test_output.txt
+network_log.jsonl
+
+# System
+Thumbs.db
+*.tmp
+*.lnk
+
+# Exclude tracked files
+!.env.example
+!.gitignore
+!mercedes_invoice.spec
+!build.bat
+!build.py
+!build_complete.py
 mercedes_invoice/network_log.jsonl
 Invoices/
 
@@ -15,6 +70,7 @@ Invoices/
 build/
 dist/
 *.spec
+!mercedes_invoice.spec
 
 # OS
 .DS_Store

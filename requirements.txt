@@ -1,12 +1,12 @@
-# Qt GUI. The app only uses QtCore/QtGui/QtWidgets, which ship in the
-# lightweight PySide6-Essentials wheel. If you later need extra Qt modules
-# (QtWebEngine, QtCharts, ...) replace these two lines with just "PySide6".
+# Core application dependencies
 PySide6-Essentials>=6.5
 shiboken6>=6.5
 reportlab>=4.0
 playwright>=1.40
 
-# Packaging (optional)
+# Build and packaging dependencies
 pyinstaller>=6.0
+setuptools>=65.0
+wheel
 
 # For automated browser install only (no other runtime deps needed)
