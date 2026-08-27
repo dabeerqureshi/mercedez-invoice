@@ -74,7 +74,9 @@ class CheckoutDialog(QDialog):
         self.table.setHorizontalHeaderLabels(
             ["Part Number", "Product", "Qty", "Unit Price", "Line Total"])
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked
+            | QAbstractItemView.EditKeyPressed)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(28)
@@ -82,8 +84,13 @@ class CheckoutDialog(QDialog):
             self.table.setItem(r, 0, QTableWidgetItem(it["part_number"]))
             self.table.setItem(r, 1, QTableWidgetItem(it.get("designation") or ""))
             self.table.setItem(r, 2, QTableWidgetItem(str(it["quantity"])))
-            self.table.setItem(r, 3, QTableWidgetItem(config.money(it["unit_price"])))
+            # Unit Price is stored as a raw number so the user can edit it.
+            self.table.setItem(r, 3, QTableWidgetItem(str(it["unit_price"])))
             self.table.setItem(r, 4, QTableWidgetItem(config.money(it["line_total"])))
+            # Only the Unit Price column (3) is editable; the rest stay locked.
+            for c in range(5):
+                self._set_editable(r, c, c == 3)
+        self.table.itemChanged.connect(self._on_parts_item_changed)
         self.table.resizeColumnsToContents()
         self.table.setFixedHeight(min(140, 46 + max(len(self.items), 1) * 28))
         root.addWidget(self.table)
@@ -235,10 +242,87 @@ class CheckoutDialog(QDialog):
             })
         return out
 
+    # ------------------------------------------------------------ parts rows
+    def _set_editable(self, r, c, editable):
+        """Enable/disable editing on a single table cell (by row, column)."""
+        item = self.table.item(r, c)
+        if item is None:
+            return
+        flags = item.flags()
+        if editable:
+            item.setFlags(flags | Qt.ItemIsEditable)
+        else:
+            item.setFlags(flags & ~Qt.ItemIsEditable)
+
+    def _parse_price(self, text):
+        """Return (numeric, is_number). Text/non-numeric -> (0.0, False).
+
+        Tolerates thousands separators (1,000) and a leading currency symbol
+        (£50) while still treating any other non-numeric text as skipped.
+        """
+        raw = str(text).strip()
+        if raw.startswith(config.CURRENCY):
+            raw = raw[len(config.CURRENCY):]
+        raw = raw.replace(",", "")
+        try:
+            return float(raw), True
+        except ValueError:
+            return 0.0, False
+
+    def _read_parts_rows(self):
+        """Read the parts table into line-item dicts.
+
+        The Unit Price cell is user-editable: if it holds a number it is used
+        for the line total; anything else (text, blank) is treated as £0 and
+        skipped from the calculation.
+        """
+        out = []
+        for r in range(self.table.rowCount()):
+            def cell(row, col):
+                it = self.table.item(row, col)
+                return (it.text() if it is not None else "")
+            part_number = cell(r, 0)
+            if not part_number:
+                continue
+            try:
+                qty = float(cell(r, 2) or 1)
+            except ValueError:
+                qty = 1.0
+            unit, is_number = self._parse_price(cell(r, 3))
+            line_total = round(unit * qty, 2) if is_number else 0.0
+            out.append({
+                "part_number": part_number,
+                "designation": cell(r, 1),
+                "quantity": qty,
+                "unit_price": unit,
+                "line_total": line_total,
+            })
+        return out
+
+    def _on_parts_item_changed(self, item):
+        """A Unit Price edit updates that row's Line Total and the totals."""
+        col = item.column()
+        if col == 3:
+            r = item.row()
+            unit, is_number = self._parse_price(item.text())
+            qty = 1.0
+            qit = self.table.item(r, 2)
+            if qit is not None:
+                try:
+                    qty = float(qit.text())
+                except ValueError:
+                    qty = 1.0
+            line_total = round(unit * qty, 2) if is_number else 0.0
+            self.table.blockSignals(True)
+            self.table.setItem(r, 4, QTableWidgetItem(config.money(line_total)))
+            self.table.blockSignals(False)
+        self._recalc()
+
     # ------------------------------------------------------------------ math
     def _calc(self):
         """Return (parts, labour, subtotal, vat, total)."""
-        parts = round(self.parts_subtotal, 2)
+        rows = self._read_parts_rows()
+        parts = round(sum(r["line_total"] for r in rows), 2)
         labour = round(sum(w["labour_cost"] for w in self._collect_work_items()), 2)
         subtotal = round(parts + labour, 2)
         vat = round(subtotal * config.VAT_RATE, 2)
@@ -275,17 +359,21 @@ class CheckoutDialog(QDialog):
         work_items = self._collect_work_items()
 
         _parts, _labour, subtotal, vat, total = self._calc()
+        retrieved_by = {
+            it["part_number"]: it.get("price_retrieved_at", "")
+            for it in self.items
+        }
         items = []
-        for it in self.items:
+        for row in self._read_parts_rows():
             items.append({
-                "part_number": it["part_number"],
-                "designation": it.get("designation", ""),
-                "quantity": it["quantity"],
-                "unit_price": it["unit_price"],
-                "line_total": it["line_total"],
-                "vat": round(round(it["line_total"], 2) * config.VAT_RATE, 2),
+                "part_number": row["part_number"],
+                "designation": row["designation"],
+                "quantity": row["quantity"],
+                "unit_price": row["unit_price"],
+                "line_total": row["line_total"],
+                "vat": round(round(row["line_total"], 2) * config.VAT_RATE, 2),
                 "discount": 0.0,
-                "price_retrieved_at": it.get("price_retrieved_at", ""),
+                "price_retrieved_at": retrieved_by.get(row["part_number"], ""),
             })
 
         try:

@@ -33,7 +33,7 @@ echo -----------------------------------------------------------
 echo  To launch the app:
 echo    python -m mercedes_invoice.main
 echo.
-echo  Or test the full pipeline without a GUI/scanner:
-echo    python selftest.py
+echo  Or verify the build (import + mock pipeline test):
+echo    python build.py --test-only
 echo ===========================================================
 pause

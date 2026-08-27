@@ -39,13 +39,12 @@ python -m mercedes_invoice.main
 > plugin \"cocoa\"" — even though the plugin file is valid). This affects both
 > the Apple system Python 3.9 and a Homebrew Python 3.12 venv. Everything
 > **except the live window** is fully verified here via:
-> - `python selftest.py` (full scan→cart→invoice→PDF→CSV→email pipeline),
-> - `python -m mercedes_invoice.main --selftest-gui` (GUI smoke test),
-> - the `/tmp/*_test.py` regression checks.
+> - `python build.py --test-only` (import smoke test + mock price-lookup pipeline),
+> - `python -m mercedes_invoice.main --selftest-gui` (GUI smoke test).
 >
 > The actual product is the **Windows `.exe`**, where PySide6 + PyInstaller
-> work normally — build it with the packaging command below and verify the
-> window on Windows.
+> work normally — build it with `build.bat` (or `python build.py`) and verify
+> the window on Windows.
 
 The app now uses the **real Mercedes price source by default** — scanning a part
 invoices the **live, current price from the Mercedes website** (list price by
@@ -227,40 +226,68 @@ keep their old prices even when Mercedes prices change later.
 5. The invoice is saved to SQLite + PDF + CSV and emailed to the customer.
    If the email fails the invoice is still saved, and you can **Retry Email**.
 
-## Quick self-test (no GUI, no scanner, no Mercedes login)
-Simulates the full pipeline with an offline price source:
+## Build verification (no GUI, no scanner, no Mercedes login)
+Verifies that all modules import correctly and the offline mock price-lookup
+pipeline works (no Mercedes login required):
 ```bash
-source .venv/bin/activate
-python selftest.py
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python build.py --test-only
 ```
-It scans two parts (one twice → quantity increments), checks out a customer,
-saves a real **SQLite** invoice + **PDF** + **CSV**, and attempts the email —
-printing the invoice number and the PDF/CSV paths so you can open and verify
-them. Use `MERCEDES_PRICE_SOURCE=mercedes` to attempt a live lookup instead
-(requires your logged-in session).
+The test imports every package module and runs a mock price lookup, printing
+`All imports OK` and `Mock price lookup OK` on success.
 
 ## Packaging (PyInstaller)
 
-**Windows (recommended):** just run `build.bat` from the project root — it wraps
-the command below and produces `dist\MercedesInvoice.exe`.
+**Windows (recommended):** just run `build.bat` from the project root — it runs
+the unified `build.py` script which:
+1. **Tests** — import smoke test + mock price-lookup pipeline
+2. **Builds** — PyInstaller with `mercedes_invoice.spec` (bundles ReportLab
+   fonts, Playwright driver, and excludes unused heavy Qt modules)
+3. **Packages** — compresses `dist/MercedesInvoice/` into
+   `IQMotorsInvoice-Release.zip` (plus `README-FIRST.txt`)
 
-Or do it manually:
+Then double-click `MercedesInvoice.exe` from the unzipped folder. (The Mercedes
+connector also needs the Playwright browser available on the target machine —
+see Playwright docs. **Build the `.exe` on a Windows machine.**)
+
+### Manual steps (equivalent)
 ```bash
-pip install pyinstaller
-pyinstaller --noconfirm --onefile --windowed \
-  --name MercedesInvoice \
-  --add-data "mercedes_invoice;mercedes_invoice" \
-  mercedes_invoice/main.py
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m playwright install chromium
+.venv\Scripts\python -m PyInstaller --noconfirm --clean mercedes_invoice.spec
 ```
-(There is also a `mercedes_invoice.spec` that additionally bundles ReportLab
-fonts and the Playwright driver — build it with
-`.venv\Scripts\python -m PyInstaller mercedes_invoice.spec`.)
 
-Then double-click `MercedesInvoice(.exe)`. (The Mercedes connector also needs
-the Playwright browser available on the target machine — see Playwright docs.
-Note: build the `.exe` on a **Windows** machine.)
+### Build flags
+```bash
+python build.py                 # full: test -> build -> zip
+python build.py --test-only     # just the test stage
+python build.py --build-only    # just the PyInstaller build
+python build.py --zip-only      # just package the zip
+```
 
 ## Layout
+```
+build.bat        Thin Windows wrapper that calls build.py
+build.py         Unified build: test + PyInstaller + zip packaging
+mercedes_invoice.spec   PyInstaller spec (bundles ReportLab fonts + Playwright driver)
+mercedes_invoice/
+  __init__.py, main.py      package + entry point
+  config.py                 VAT, currency, paths, SMTP, timeouts
+  db.py                     SQLite: customers, invoices, invoice_items
+  pdf.py                    ReportLab invoice -> Invoices/<year>/INV-<n>.pdf
+  csv_export.py             CSV record -> Invoices/<year>/INV-<n>.csv
+  emailer.py                SMTP with attachment + retry semantics
+  assets/                   logo.png, footer.png, app.ico
+  connectors/
+    __init__.py             factory (make_source)
+    base.py                 PriceSource interface
+    mock.py                 offline deterministic prices
+    mercedes.py             Playwright persistent-profile connector (login/session)
+  ui/
+    __init__.py             MainWindow + run()
+    main_window.py          PySide6 POS scan screen (background price worker)
+    checkout_dialog.py      cart + vehicle details + customer details + Save & Email
+    style.py                shared Qt stylesheet
 ```
 build.bat           Windows PyInstaller build script
 mercedes_invoice.spec   optional richer PyInstaller spec

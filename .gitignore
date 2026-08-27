@@ -4,14 +4,25 @@ __pycache__/
 .venv/
 .venv312/
 venv/
+*.egg-info/
 
-# App runtime data
+# App runtime data (generated at runtime, never commit)
 mercedes_invoice/mercedes_invoice.db
 mercedes_invoice/mercedes_invoice.db-*
 mercedes_invoice/mercedes_browser/
+mercedes_invoice/network_log.jsonl
 Invoices/
 logs/
 *.log
+
+# Build & Packaging outputs
+build/
+dist/
+MercedesInvoice/
+IQMotorsInvoice-Release.zip
+*.msi
+*.exe
+*.spec~
 
 # IDE & Editor
 .vscode/
@@ -20,15 +31,6 @@ logs/
 *.swo
 *~
 .DS_Store
-
-# Build & Packaging
-build/
-dist/
-MercedesInvoice/
-*.egg-info/
-*.msi
-*.exe
-*.spec~
 
 # Configuration & Secrets
 .env
@@ -49,28 +51,14 @@ _tmp_*.py
 *.bak
 *.backup
 *_test_output.txt
-network_log.jsonl
 
 # System
 Thumbs.db
 *.tmp
 *.lnk
 
-# Exclude tracked files
-!.env.example
+# Keep tracked files
 !.gitignore
 !mercedes_invoice.spec
 !build.bat
 !build.py
-!build_complete.py
-mercedes_invoice/network_log.jsonl
-Invoices/
-
-# Packaging
-build/
-dist/
-*.spec
-!mercedes_invoice.spec
-
-# OS
-.DS_Store

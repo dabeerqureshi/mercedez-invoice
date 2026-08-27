@@ -39,6 +39,13 @@ def normalize_part(part: str) -> str:
     return re.sub(r"\s+", "", part or "").upper()
 
 
+def _find_chrome_exe(root: str) -> str:
+    """Locate a chrome.exe inside a bundled Chromium folder (or '')."""
+    import glob
+    hits = glob.glob(os.path.join(root, "**", "chrome.exe"), recursive=True)
+    return hits[0] if hits else ""
+
+
 def _log(entry: dict) -> None:
     entry["ts"] = now_iso()
     os.makedirs(os.path.dirname(config.NETWORK_LOG) or ".", exist_ok=True)
@@ -63,6 +70,12 @@ class MercedesPriceSource(PriceSource):
         fresh one is launched from ``config.PROFILE_DIR``. Because the profile
         is persistent, the user's Mercedes login is restored automatically —
         reopening here never requires re-logging in.
+
+        Browser resolution order (so client machines need NOTHING installed):
+          1. a Chromium bundled inside the release (config.BUNDLED_BROWSER_DIR)
+          2. Microsoft Edge   (preinstalled on Windows 10/11)
+          3. Google Chrome    (if installed)
+          4. Playwright's own Chromium
         """
         from playwright.sync_api import sync_playwright  # lazy import
 
@@ -83,10 +96,23 @@ class MercedesPriceSource(PriceSource):
 
         os.makedirs(config.PROFILE_DIR, exist_ok=True)
         self._pw = sync_playwright().start()
-        self._context = self._pw.chromium.launch_persistent_context(
-            user_data_dir=config.PROFILE_DIR,
-            headless=False,
-        )
+
+        launch_error = None
+        for kwargs in self._browser_launch_variants():
+            try:
+                self._context = self._pw.chromium.launch_persistent_context(
+                    user_data_dir=config.PROFILE_DIR, **kwargs)
+                break
+            except Exception as e:  # try the next browser on the machine
+                launch_error = e
+                self._context = None
+        if self._context is None:
+            raise PriceSourceError(
+                "Could not start a browser on this machine. "
+                "Microsoft Edge or Google Chrome must be present "
+                f"(last error: {launch_error})"
+            )
+
         self._page = (
             self._context.pages[0]
             if self._context.pages
@@ -95,6 +121,25 @@ class MercedesPriceSource(PriceSource):
         # Start capturing network traffic for the discovery step.
         self._context.on("request", self._on_request)
         self._context.on("response", self._on_response)
+
+    @staticmethod
+    def _browser_launch_variants():
+        """Launch-kwarg candidates, most self-contained first."""
+        headless = {"headless": False}   # visible window: the user watches
+                                         # Mercedes live in the side browser
+        variants = []
+        # 1) Chromium bundled inside the release folder (fully offline).
+        bundled = config.BUNDLED_BROWSER_DIR
+        if bundled and os.path.isdir(bundled):
+            exe = _find_chrome_exe(bundled)
+            if exe:
+                variants.append({"executable_path": exe, **headless})
+        # 2) Edge / 3) Chrome - preinstalled on virtually every Windows box.
+        variants.append({"channel": "msedge", **headless})
+        variants.append({"channel": "chrome", **headless})
+        # 4) Playwright's own Chromium (only if its installer was ever run).
+        variants.append(dict(headless))
+        return variants
 
     def _browser_dead(self) -> bool:
         """True if the browser/context/page was closed (e.g. by the user)."""
