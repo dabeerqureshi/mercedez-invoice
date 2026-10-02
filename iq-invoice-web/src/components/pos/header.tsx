@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
 import { Button } from "@/components/ui/button";
 import { APP_NAME } from "@/lib/config";
 
@@ -15,6 +18,8 @@ interface HeaderProps {
   priceSource: string;
   connection?: ConnectionState;
   onLogin?: () => void;
+  /** Phase 4 auth: shown only when APP_PASSWORD is configured. */
+  onLogout?: () => void;
 }
 
 const BADGES: Record<
@@ -43,8 +48,22 @@ export function Header({
   priceSource,
   connection = "unknown",
   onLogin,
+  onLogout,
 }: HeaderProps) {
   const badge = connection === "unknown" ? null : BADGES[connection];
+  const pathname = usePathname();
+  const navLink = (href: string, label: string) => (
+    <Link
+      href={href}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        pathname === href
+          ? "bg-white/15 text-white"
+          : "text-header-muted hover:bg-white/10 hover:text-white"
+      }`}
+    >
+      {label}
+    </Link>
+  );
   return (
     <header className="bg-header">
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-3 px-6 py-3">
@@ -57,6 +76,10 @@ export function Header({
           </span>
         </div>
         <div className="ml-auto flex items-center gap-3">
+          <nav className="flex items-center gap-1">
+            {navLink("/", "POS")}
+            {navLink("/history", "History")}
+          </nav>
           <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-medium text-header-muted">
             Price source: {priceSource}
           </span>
@@ -72,6 +95,11 @@ export function Header({
               {connection === "pending"
                 ? "Continue Mercedes Login"
                 : "Open Mercedes & Login"}
+            </Button>
+          )}
+          {onLogout && (
+            <Button variant="header" size="sm" onClick={onLogout}>
+              Sign out
             </Button>
           )}
         </div>

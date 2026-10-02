@@ -13,6 +13,7 @@
  */
 import { NextResponse } from "next/server";
 
+import { guardRequest } from "@/lib/auth";
 import { deleteContext, endSession } from "@/lib/browserbase";
 import { clearSessionState, getSessionState, saveSessionState } from "@/lib/db/session-store";
 import { withLock } from "@/lib/lock";
@@ -25,6 +26,8 @@ interface Body {
 }
 
 export async function POST(req: Request) {
+  const denied = guardRequest(req);
+  if (denied) return denied;
   let body: Body = {};
   try {
     body = await req.json();

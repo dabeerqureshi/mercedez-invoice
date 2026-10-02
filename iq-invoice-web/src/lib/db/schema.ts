@@ -66,4 +66,7 @@ export const mercedesSessions = sqliteTable("mercedes_sessions", {
   status: text("status").notNull(), // "pending_login" | "connected"
   connectedAt: text("connected_at"),
   updatedAt: text("updated_at"),
+  // Phase 4: timestamp of the last successful live lookup — the keep-alive
+  // idle guard skips its quiet refresh while activity is recent.
+  lastActivityAt: text("last_activity_at"),
 });

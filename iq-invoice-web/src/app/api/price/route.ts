@@ -8,6 +8,7 @@
  */
 import { NextResponse } from "next/server";
 
+import { guardRequest } from "@/lib/auth";
 import { PRICE_SOURCE } from "@/lib/config";
 import {
   LoginRequiredError,
@@ -24,6 +25,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  const denied = guardRequest(req);
+  if (denied) return denied;
   let body: { partNumber?: string };
   try {
     body = await req.json();

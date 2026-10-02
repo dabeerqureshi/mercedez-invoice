@@ -22,6 +22,7 @@ import {
   getLiveUrls,
   isBrowserbaseConfigured,
 } from "@/lib/browserbase";
+import { guardRequest } from "@/lib/auth";
 import {
   BROWSERBASE_CONTEXT_NAME,
   LOGIN_SESSION_TIMEOUT_S,
@@ -36,7 +37,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function POST() {
+export async function POST(req: Request) {
+  const denied = guardRequest(req);
+  if (denied) return denied;
   if (!isBrowserbaseConfigured()) {
     return NextResponse.json(
       {

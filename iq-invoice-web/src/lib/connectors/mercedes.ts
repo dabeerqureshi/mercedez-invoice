@@ -26,7 +26,7 @@ import {
   withPage,
   type CreatedSession,
 } from "../browserbase";
-import { getSessionState } from "../db/session-store";
+import { getSessionState, touchActivity } from "../db/session-store";
 import { withLock } from "../lock";
 import * as cfg from "./mercedes-config";
 import {
@@ -82,7 +82,10 @@ export class MercedesPriceSource implements PriceSource {
     }
     const contextId = state.contextId;
     // Serialise: one session on one Context at a time (Browserbase rule).
-    return withLock(() => lookupPrice(partNumber, contextId));
+    const result = await withLock(() => lookupPrice(partNumber, contextId));
+    // Phase 4: remember the activity so the keep-alive can skip its refresh.
+    await touchActivity();
+    return result;
   }
 
   get status(): string {
@@ -92,6 +95,83 @@ export class MercedesPriceSource implements PriceSource {
       ? "mercedes (Browserbase cloud browser)"
       : "mercedes (not configured — set BROWSERBASE_API_KEY)";
   }
+}
+
+export interface KeepAliveOutcome {
+  action:
+    | "not_configured"
+    | "disabled"
+    | "disconnected"
+    | "recent_activity"
+    | "refreshed"
+    | "login_page"
+    | "error";
+  detail?: string;
+}
+
+/**
+ * Quiet activity to stop Mercedes' idle-timeout logging you out mid-day —
+ * port of MercedesPriceSource.keep_alive() from mercedes.py.
+ *
+ * The desktop app softly reloaded the parked catalog page from a background
+ * timer; here we open a short session on the persistent Context and load the
+ * catalog once (a fresh session starts on about:blank, so that load IS the
+ * refresh). If the site bounces to a login screen we just report it —
+ * get_price() still surfaces an honest LoginRequiredError on the next scan,
+ * exactly like the desktop behaviour.
+ */
+export async function keepAliveSession(): Promise<KeepAliveOutcome> {
+  if (!isBrowserbaseConfigured()) return { action: "not_configured" };
+  if (cfg.MERCEDES_KEEP_ALIVE_S <= 0) return { action: "disabled" };
+  const state = await getSessionState();
+  if (!state || state.status !== "connected" || !state.contextId) {
+    return { action: "disconnected" };
+  }
+  // Idle guard: a recent lookup already refreshed the site session.
+  const last = state.lastActivityAt
+    ? Date.parse(
+        state.lastActivityAt.endsWith("Z")
+          ? state.lastActivityAt
+          : `${state.lastActivityAt}Z`,
+      )
+    : NaN;
+  if (
+    Number.isFinite(last) &&
+    Date.now() - last < cfg.MERCEDES_KEEP_ALIVE_S * 1000
+  ) {
+    return { action: "recent_activity" };
+  }
+
+  const contextId = state.contextId;
+  return withLock(async () => {
+    let session: CreatedSession;
+    try {
+      session = await createSession({
+        contextId,
+        timeoutSeconds: cfg.VERIFY_SESSION_TIMEOUT_S,
+        keepAlive: false,
+      });
+    } catch (e) {
+      return {
+        action: "error" as const,
+        detail: e instanceof Error ? e.message : String(e),
+      };
+    }
+    try {
+      return await withPage(session.connectUrl, async (page) => {
+        await page
+          .goto(cfg.MERCEDES_CATALOG_URL, {
+            waitUntil: "domcontentloaded",
+            timeout: cfg.MERCEDES_NAV_TIMEOUT_MS,
+          })
+          .catch(() => undefined);
+        if (await isLoginPage(page)) return { action: "login_page" as const };
+        return { action: "refreshed" as const };
+      });
+    } finally {
+      await endSession(session.id);
+    }
+  });
 }
 
 /**

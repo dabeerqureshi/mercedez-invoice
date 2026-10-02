@@ -14,12 +14,14 @@ Mercedes pricing.
 | **1 — UI + mock pricing** | Scan → cart → checkout (vehicle / work / customer) → totals, mock price source | ✅ Done |
 | **2 — Save pipeline** | SQLite (libSQL/Turso) + Drizzle, `@react-pdf` invoice, CSV, Vercel Blob (local fallback), SMTP email + Retry | ✅ Done |
 | **3 — Live Mercedes** | Browserbase Context + Live View ("log in once"), Playwright port of `mercedes.py` | ✅ Done |
-| **4 — Hardening** | Scan queue/serialisation, Vercel Cron keep-alive, auth, invoice history | ⏳ Planned |
+| **4 — Hardening** | Scan queue/serialisation, Vercel Cron keep-alive, auth, invoice history | ✅ Done |
 
 Phases 1–2 run **offline with nothing configured**: mock prices, a local SQLite
 file at `.data/`, and invoice files written under `.data/`. No Mercedes login,
 no Browserbase, no cloud accounts required. Phase 3 activates when you set
-`NEXT_PUBLIC_PRICE_SOURCE=mercedes` and Browserbase credentials.
+`NEXT_PUBLIC_PRICE_SOURCE=mercedes` and Browserbase credentials. Phase 4's
+password gate (`APP_PASSWORD`) and keep-alive cron (`CRON_SECRET`) are
+optional — unset, everything behaves like the open desktop release.
 
 ## Quick start
 
@@ -112,6 +114,41 @@ Scan a part             ->  POST /api/price               (fresh session on the 
 - **Secrets** stay server-side: `BROWSERBASE_API_KEY` / 
   `BROWSERBASE_PROJECT_ID` are read only in API routes.
 
+## Hardening (Phase 4)
+
+**Scan queue.** Scanned parts go through a client-side FIFO and are looked up
+strictly one at a time, in scan order — the exact behaviour of the desktop
+app's `PriceWorker` background thread (the first web build fired them all in
+parallel). Duplicate scans still increment quantity, also like the desktop.
+
+**Session keep-alive.** The desktop app softly reloaded the parked catalog
+every `MERCEDES_KEEP_ALIVE_S` (default 240s, `0` disables) so Mercedes'
+idle-timeout doesn't log you out mid-day. On the web three triggers hit
+`GET /api/cron/keep-alive`:
+
+- the open POS page (a timer while connected — same role as the desktop QTimer),
+- Vercel Cron (`vercel.json`, daily at 06:00 UTC — the Hobby plan allows only
+  one run per day; schedule more often on Pro),
+- an external pinger (`/api/cron/keep-alive?secret=$CRON_SECRET`) for
+  sub-hourly refreshes on any plan.
+
+The route skips the refresh when a lookup happened within the interval
+(`mercedes_sessions.last_activity_at`) and reports what it did (`refreshed`,
+`recent_activity`, `login_page`, ...). Auth accepts
+`Authorization: Bearer $CRON_SECRET` (sent automatically by Vercel Cron when
+`CRON_SECRET` is set in the project env), a valid session cookie, or
+`?secret=`.
+
+**Auth.** With `APP_PASSWORD` unset the app is open — exactly like the desktop
+release, so local dev stays zero-config. Set it and every page and API route
+requires a signed session cookie: `/login` signs in, the header shows **Sign
+out**. `AUTH_SECRET` optionally keys the cookie HMAC (defaults to the
+password). This is a single shared shop password, not a multi-user system.
+
+**Invoice history.** The header links **History** (`/history`): every saved
+invoice, newest first, with customer/vehicle/item counts/total, PDF and CSV
+links, and one-click **Resend** (`GET /api/invoices` powers the page).
+
 ## Invoice maths (unchanged from the desktop app)
 
 ```
@@ -126,19 +163,27 @@ TOTAL    = SUBTOTAL + VAT
 src/
   app/
     layout.tsx                     root layout + toaster
-    page.tsx                       POS screen
+    page.tsx                       POS screen (auth-gated when APP_PASSWORD set)
+    login/page.tsx                 password sign-in (Phase 4)
+    history/page.tsx               invoice history (Phase 4)
     globals.css                    brand theme (ported from ui/style.py)
     api/
       price/route.ts               POST { partNumber } -> PriceResult
+      auth/login/route.ts          POST { password } -> session cookie (Phase 4)
+      auth/logout/route.ts         POST clear the session cookie
+      cron/keep-alive/route.ts     GET quiet Mercedes session refresh (Phase 4)
       mercedes/status/route.ts     GET  connection state for the header badge
       mercedes/connect/route.ts    POST open the Live View login window
       mercedes/verify/route.ts     POST confirm the login -> status connected
       mercedes/disconnect/route.ts POST cancel login window / full reset
       invoices/route.ts            POST checkout payload -> save pipeline
+                                 GET  history list (Phase 4)
       invoices/[number]/resend/    POST retry email
       files/[...path]/route.ts     serve locally-stored invoice files
   components/
     ui/                            button, input, label, card, table, dialog, badge
+    auth/login-form.tsx            password form (Phase 4)
+    history/history-app.tsx        invoice history table (Phase 4)
     pos/
       pos-app.tsx                  scan -> cart -> checkout orchestration
       header.tsx                   brand header bar + connection badge
@@ -148,6 +193,7 @@ src/
       checkout-dialog.tsx          parts + vehicle + work + customer + result panel
   lib/
     config.ts                      brand, VAT, money(), SMTP (from env)
+    auth.ts                        APP_PASSWORD session cookie guard (Phase 4)
     browserbase.ts                 Browserbase session/Context/CDP wrapper
     lock.ts                        serialises all browser work (one session)
     pricing.ts                     totals maths, parsePrice, safeNamePart
@@ -167,6 +213,9 @@ src/
 
 See `.env.example`. Phase 1–2 need nothing set. Later phases add Turso, Vercel
 Blob, SMTP and Browserbase values (server-side only — never commit secrets).
+Phase 4 adds optional `APP_PASSWORD` / `AUTH_SECRET` (login), `CRON_SECRET`
+(keep-alive cron) and `MERCEDES_KEEP_ALIVE_S` (refresh interval). Remember to
+set `APP_PASSWORD` and `CRON_SECRET` in the Vercel project env as well.
 
 ## Parity with the desktop app
 

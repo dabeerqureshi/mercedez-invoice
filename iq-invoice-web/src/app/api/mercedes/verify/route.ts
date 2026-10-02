@@ -14,6 +14,7 @@
  */
 import { NextResponse } from "next/server";
 
+import { guardRequest } from "@/lib/auth";
 import {
   createSession,
   endSession,
@@ -37,7 +38,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const denied = guardRequest(req);
+  if (denied) return denied;
   if (!isBrowserbaseConfigured()) {
     return NextResponse.json(
       { ok: false, error: "Browserbase is not configured." },

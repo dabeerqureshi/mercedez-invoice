@@ -20,6 +20,7 @@ export interface MercedesSessionState {
   status: MercedesStatus;
   connectedAt: string | null;
   updatedAt: string | null;
+  lastActivityAt: string | null;
 }
 
 function nowIso(): string {
@@ -44,6 +45,7 @@ export async function getSessionState(): Promise<MercedesSessionState | null> {
         : "logged_out",
     connectedAt: row.connectedAt,
     updatedAt: row.updatedAt,
+    lastActivityAt: row.lastActivityAt,
   };
 }
 
@@ -78,15 +80,37 @@ export async function saveSessionState(
         status: patch.status,
         connectedAt: patch.connectedAt ?? null,
         updatedAt: updated_at,
+        // last_activity_at is intentionally NOT reset here — it is only written
+        // by touchActivity() and must survive connection-state changes.
       },
     });
+  const after = await getSessionState();
+  if (after) return after;
   return {
     contextId: patch.contextId,
     pendingSessionId: patch.pendingSessionId ?? null,
     status: patch.status,
     connectedAt: patch.connectedAt ?? null,
     updatedAt: updated_at,
+    lastActivityAt: null,
   };
+}
+
+/**
+ * Record a successful live lookup. The keep-alive route uses this as its idle
+ * guard: a recent lookup already proves the Mercedes session is alive, so the
+ * quiet catalog refresh is skipped (port of PriceWorker._last_activity).
+ */
+export async function touchActivity(): Promise<void> {
+  try {
+    await ensureSchema();
+    await getDb()
+      .update(mercedesSessions)
+      .set({ lastActivityAt: nowIso() })
+      .where(eq(mercedesSessions.id, 1));
+  } catch {
+    // Activity tracking is best-effort; never break a lookup over it.
+  }
 }
 
 /** Remove the connection state (Disconnect). */

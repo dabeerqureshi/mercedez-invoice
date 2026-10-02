@@ -53,6 +53,17 @@ export const VERIFY_SESSION_TIMEOUT_S = 120;
 /** Price lookup session: auto-ends when the CDP connection drops. */
 export const PRICE_SESSION_TIMEOUT_S = 300;
 
+// --- Session keep-alive (Phase 4) -------------------------------------------
+/**
+ * Quiet catalog refresh between scans, port of MERCEDES_KEEP_ALIVE_S from
+ * config.py (240s default, 0 disables). Fires from the open POS page as a
+ * timer and from Vercel Cron / an external pinger when nobody has the page
+ * open; the server skips the refresh while a lookup happened recently.
+ */
+export const MERCEDES_KEEP_ALIVE_S = Number(
+  process.env.MERCEDES_KEEP_ALIVE_S || 240,
+);
+
 /** Context name shown in the Browserbase dashboard. */
 export const BROWSERBASE_CONTEXT_NAME = "iq-invoice-mercedes";
 

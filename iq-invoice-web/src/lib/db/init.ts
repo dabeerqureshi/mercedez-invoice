@@ -58,7 +58,8 @@ const CREATE_STATEMENTS = [
       pending_session_id  TEXT,
       status              TEXT NOT NULL,
       connected_at        TEXT,
-      updated_at          TEXT
+      updated_at          TEXT,
+      last_activity_at    TEXT
     )`,
 ];
 
@@ -86,6 +87,13 @@ async function run(): Promise<void> {
     if (!invCols.has(name)) {
       await client.execute(`ALTER TABLE invoices ADD COLUMN ${name} TEXT`);
     }
+  }
+  // Phase 4: keep-alive idle guard.
+  const sessionCols = await columns("mercedes_sessions");
+  if (!sessionCols.has("last_activity_at")) {
+    await client.execute(
+      "ALTER TABLE mercedes_sessions ADD COLUMN last_activity_at TEXT",
+    );
   }
 }
 

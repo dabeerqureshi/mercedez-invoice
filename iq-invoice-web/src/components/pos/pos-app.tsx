@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,6 +37,14 @@ export function PosApp() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>("unknown");
+  const [keepAliveSeconds, setKeepAliveSeconds] = useState(0);
+  const [authOn, setAuthOn] = useState(false);
+  /**
+   * Phase 4 scan queue (port of the desktop PriceWorker): scanned parts line
+   * up here and are looked up strictly one at a time, in scan order.
+   */
+  const queueRef = useRef<string[]>([]);
+  const drainingRef = useRef(false);
 
   const parts: PartsLine[] = useMemo(
     () =>
@@ -57,6 +66,8 @@ export function PosApp() {
       configured?: boolean;
       connected?: boolean;
       pendingLogin?: boolean;
+      keepAliveSeconds?: number;
+      authEnabled?: boolean;
     }) => {
       if (!data?.ok) return;
       setConnection(
@@ -68,6 +79,10 @@ export function PosApp() {
               ? "pending"
               : "disconnected",
       );
+      if (typeof data.keepAliveSeconds === "number") {
+        setKeepAliveSeconds(data.keepAliveSeconds);
+      }
+      if (typeof data.authEnabled === "boolean") setAuthOn(data.authEnabled);
     },
     [],
   );
@@ -94,6 +109,28 @@ export function PosApp() {
       stale = true;
     };
   }, [applyStatus]);
+
+  /**
+   * Phase 4 keep-alive: while the POS page is open and the Mercedes session is
+   * connected, ping the server every `keepAliveSeconds` — the web equivalent of
+   * the desktop MainWindow QTimer. The server's idle guard makes the ping a
+   * no-op when a lookup happened recently.
+   */
+  useEffect(() => {
+    if (connection !== "connected" || keepAliveSeconds <= 0) return;
+    const id = setInterval(() => {
+      fetch("/api/cron/keep-alive").catch(() => undefined);
+    }, keepAliveSeconds * 1000);
+    return () => clearInterval(id);
+  }, [connection, keepAliveSeconds]);
+
+  /** Phase 4 auth: clear the session cookie and land on /login. */
+  const router = useRouter();
+  const handleLogout = useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    router.push("/login");
+    router.refresh();
+  }, [router]);
 
   const addToCart = useCallback((r: PriceResult) => {
     setCart((prev) => {
@@ -124,49 +161,74 @@ export function PosApp() {
       ];
     });
   }, []);
-  const lookupPart = useCallback(
-    async (part: string) => {
-      setPending((prev) => (prev.includes(part) ? prev : [...prev, part]));
-      try {
-        const res = await fetch("/api/price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ partNumber: part }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) {
-          const description = data.error || "Could not retrieve a price.";
-          if (data.kind === "login_required") {
-            toast.error("Mercedes login required", {
-              description,
-              action: { label: "Connect", onClick: () => setConnectOpen(true) },
-            });
-          } else if (data.kind === "not_found") {
-            toast.warning("Part not found", { description });
+  /**
+   * Phase 4: FIFO lookup drain (port of the desktop PriceWorker queue).
+   *
+   * The desktop app pushed every scanned part into one background worker that
+   * processed them strictly one at a time, in scan order. The first web
+   * version fired them all in parallel; this restores the desktop semantics —
+   * one lookup at a time, results applied in order — so rapid scans behave
+   * exactly like the barcode gun on the local app.
+   */
+  const drainQueue = useCallback(async () => {
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+    try {
+      while (queueRef.current.length > 0) {
+        const part = queueRef.current[0];
+        setPending(queueRef.current.slice());
+        try {
+          const res = await fetch("/api/price", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ partNumber: part }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            const description = data.error || "Could not retrieve a price.";
+            if (data.kind === "login_required") {
+              toast.error("Mercedes login required", {
+                description,
+                action: {
+                  label: "Connect",
+                  onClick: () => setConnectOpen(true),
+                },
+              });
+            } else if (data.kind === "not_found") {
+              toast.warning("Part not found", { description });
+            } else {
+              toast.error("Mercedes unavailable", { description });
+            }
           } else {
-            toast.error("Mercedes unavailable", { description });
+            addToCart(data.result as PriceResult);
           }
-          return;
+        } catch (e) {
+          toast.error("Lookup failed", {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        } finally {
+          // Only this drain ever shifts, and scans only ever push, so the
+          // part we just finished is still at index 0.
+          queueRef.current.shift();
+          setPending(queueRef.current.slice());
         }
-        addToCart(data.result as PriceResult);
-      } catch (e) {
-        toast.error("Lookup failed", {
-          description: e instanceof Error ? e.message : String(e),
-        });
-      } finally {
-        setPending((prev) => prev.filter((p) => p !== part));
       }
-    },
-    [addToCart],
-  );
+    } finally {
+      drainingRef.current = false;
+      setPending([]);
+    }
+  }, [addToCart]);
 
   const handleScan = useCallback(() => {
     const raw = scanValue.trim();
     if (!raw) return;
     const partsToLookup = parseParts(raw);
     setScanValue("");
-    for (const part of partsToLookup) void lookupPart(part);
-  }, [scanValue, lookupPart]);
+    if (partsToLookup.length === 0) return;
+    queueRef.current.push(...partsToLookup);
+    setPending(queueRef.current.slice());
+    void drainQueue();
+  }, [scanValue, drainQueue]);
 
   const handleQtyChange = useCallback((partNumber: string, qty: number) => {
     setCart((prev) =>
@@ -203,6 +265,7 @@ export function PosApp() {
         priceSource={PRICE_SOURCE}
         connection={connection}
         onLogin={() => setConnectOpen(true)}
+        onLogout={authOn ? handleLogout : undefined}
       />
 
       <main className="mx-auto w-full max-w-6xl flex-1 space-y-4 px-6 py-6">

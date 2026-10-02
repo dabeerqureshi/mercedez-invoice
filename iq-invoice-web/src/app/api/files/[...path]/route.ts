@@ -7,15 +7,18 @@
  */
 import { NextResponse } from "next/server";
 
+import { guardRequest } from "@/lib/auth";
 import { contentTypeFor, isBlobConfigured, readLocalFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  const denied = guardRequest(req);
+  if (denied) return denied;
   if (isBlobConfigured()) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
