@@ -147,7 +147,17 @@ password). This is a single shared shop password, not a multi-user system.
 
 **Invoice history.** The header links **History** (`/history`): every saved
 invoice, newest first, with customer/vehicle/item counts/total, PDF and CSV
-links, and one-click **Resend** (`GET /api/invoices` powers the page).
+links, and one-click **Resend** (`GET /api/invoices` powers the page). Pages
+of 50 with a **Load more** button (`?offset=`), so years of invoices stay fast.
+
+**Production notes.** Login brute force is throttled (10 failed attempts per
+IP per 15 min → `429` + `Retry-After`, plus a ~300 ms delay on every failure;
+best-effort per serverless instance — put a WAF in front for a hard guarantee).
+Rotating `APP_PASSWORD` / `AUTH_SECRET` invalidates every session at once.
+Security headers (`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`,
+`Permissions-Policy`) are set in `next.config.ts` (`poweredByHeader: false`
+too) and `robots.txt` disallows all crawling. Prefer the `Authorization`
+header for keep-alive pings — `?secret=` appears in request logs.
 
 ## Invoice maths (unchanged from the desktop app)
 
@@ -214,8 +224,26 @@ src/
 See `.env.example`. Phase 1–2 need nothing set. Later phases add Turso, Vercel
 Blob, SMTP and Browserbase values (server-side only — never commit secrets).
 Phase 4 adds optional `APP_PASSWORD` / `AUTH_SECRET` (login), `CRON_SECRET`
-(keep-alive cron) and `MERCEDES_KEEP_ALIVE_S` (refresh interval). Remember to
-set `APP_PASSWORD` and `CRON_SECRET` in the Vercel project env as well.
+(keep-alive cron) and `MERCEDES_KEEP_ALIVE_S` (refresh interval).
+
+### Deploying to Vercel (checklist)
+
+Everything runs zero-config **locally**, but the serverless filesystem is
+ephemeral — the local SQLite file and `.data/` folder do **not** survive
+there. Set these in the project environment before going live:
+
+- `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` — otherwise invoices are lost
+- `BLOB_READ_WRITE_TOKEN` — otherwise invoice PDFs/CSVs are lost
+- `APP_PASSWORD` — without it the deployed app is open to anyone with the URL
+- `CRON_SECRET` — so Vercel Cron's `Authorization: Bearer` header is accepted
+- `NEXT_PUBLIC_PRICE_SOURCE=mercedes` + `BROWSERBASE_API_KEY`/`PROJECT_ID` —
+  live pricing (mock source works with none of this)
+- `SMTP_*` — email; unset, invoices still save and offer **Resend**
+
+Notes: browser-touching routes declare `maxDuration = 60`, which needs Fluid
+Compute (default on new projects; classic Hobby caps functions at 10 s — too
+short for a live lookup). The login throttle is per-instance memory; for a
+hard limit front the app with Cloudflare/Vercel WAF.
 
 ## Parity with the desktop app
 

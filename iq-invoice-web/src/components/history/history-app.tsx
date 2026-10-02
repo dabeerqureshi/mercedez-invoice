@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,8 +35,11 @@ interface HistoryInvoice {
  * access to the stored PDF/CSV and a one-click email resend.
  */
 export function HistoryApp() {
+  const router = useRouter();
   const [rows, setRows] = useState<HistoryInvoice[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [resending, setResending] = useState<number | null>(null);
 
@@ -44,30 +48,66 @@ export function HistoryApp() {
     setError("");
     try {
       const res = await fetch("/api/invoices");
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
       const data = await res.json();
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Could not load invoices.");
       }
       setRows(data.invoices);
+      setHasMore(Boolean(data.hasMore));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
+
+  /** Fetch the next page of 50 and append it. */
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const res = await fetch(`/api/invoices?offset=${rows.length}`);
+      if (res.status === 401) {
+        router.push("/login");
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Could not load invoices.");
+      }
+      setRows((prev) => [...prev, ...(data.invoices as HistoryInvoice[])]);
+      setHasMore(Boolean(data.hasMore));
+    } catch (e) {
+      toast.error("Could not load more", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [rows.length, router]);
 
   useEffect(() => {
     // Initial load: state updates happen inside the fetch callbacks (the
     // react-hooks/set-state-in-effect rule forbids direct calls here).
     let stale = false;
     fetch("/api/invoices")
-      .then((res) => res.json())
+      .then((res) => {
+        if (res.status === 401) {
+          if (!stale) router.push("/login");
+          return null;
+        }
+        return res.json();
+      })
       .then((data) => {
-        if (stale) return;
+        if (stale || !data) return;
         if (!data?.ok) {
           setError(data?.error || "Could not load invoices.");
         } else {
           setRows(data.invoices);
+          setHasMore(Boolean(data.hasMore));
         }
       })
       .catch((e) => {
@@ -79,7 +119,7 @@ export function HistoryApp() {
     return () => {
       stale = true;
     };
-  }, []);
+  }, [router]);
 
   const resend = useCallback(async (n: number) => {
     setResending(n);
@@ -214,6 +254,18 @@ export function HistoryApp() {
                   ))}
                 </tbody>
               </table>
+              {hasMore && (
+                <div className="flex justify-center border-t border-border/60 py-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={loadingMore}
+                    onClick={() => void loadMore()}
+                  >
+                    {loadingMore ? "Loading…" : "Load more"}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </Card>

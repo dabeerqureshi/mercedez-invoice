@@ -52,6 +52,8 @@ export function LoginForm() {
         <form onSubmit={submit} className="mt-4 space-y-3">
           <Input
             type="password"
+            name="password"
+            autoComplete="current-password"
             autoFocus
             value={password}
             onChange={(e) => setPassword(e.target.value)}

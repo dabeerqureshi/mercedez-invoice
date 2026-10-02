@@ -12,7 +12,7 @@
  * Server-only: never import this module from a client component (it pulls in
  * next/headers and reads secrets).
  */
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -54,20 +54,36 @@ export function isValidSessionToken(token: string | null | undefined): boolean {
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
-  return Number(exp) * 1000 > Date.now();
+  const expiry = Number(exp);
+  return Number.isFinite(expiry) && expiry * 1000 > Date.now();
+}
+
+/**
+ * Constant-time string comparison that hides length too: both sides are
+ * reduced to a SHA-256 digest (fixed size) before timingSafeEqual. Used for
+ * the password and the cron secret.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a, "utf8").digest();
+  const hb = createHash("sha256").update(b, "utf8").digest();
+  return timingSafeEqual(ha, hb);
 }
 
 export function passwordsMatch(candidate: string): boolean {
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(authPassword());
-  return a.length === b.length && timingSafeEqual(a, b);
+  return safeEqual(candidate, authPassword());
 }
 
 /** Pull our session cookie out of a request's Cookie header. */
 export function readSessionCookie(req: Request): string | null {
   const header = req.headers.get("cookie") ?? "";
   const match = header.match(/(?:^|;\s*)iq_session=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    // Malformed percent-encoding must fail closed (401), never throw a 500.
+    return null;
+  }
 }
 
 /**

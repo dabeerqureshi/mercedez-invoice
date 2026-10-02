@@ -17,6 +17,7 @@ import {
   authEnabled,
   isValidSessionToken,
   readSessionCookie,
+  safeEqual,
 } from "@/lib/auth";
 import { keepAliveSession } from "@/lib/connectors/mercedes";
 
@@ -31,7 +32,11 @@ function authorized(req: Request): boolean {
     ? header.slice(7).trim()
     : "";
   const querySecret = new URL(req.url).searchParams.get("secret") ?? "";
-  if (cronSecret && (bearer === cronSecret || querySecret === cronSecret)) {
+  if (
+    cronSecret &&
+    ((bearer.length > 0 && safeEqual(bearer, cronSecret)) ||
+      (querySecret.length > 0 && safeEqual(querySecret, cronSecret)))
+  ) {
     return true;
   }
   // The open POS page pings with its session cookie.

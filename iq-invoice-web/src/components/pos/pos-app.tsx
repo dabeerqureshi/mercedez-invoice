@@ -183,6 +183,16 @@ export function PosApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ partNumber: part }),
           });
+          if (res.status === 401) {
+            // Session expired mid-scan: drop the queue and re-authenticate
+            // instead of toasting one error per remaining part.
+            queueRef.current = [];
+            toast.error("Session expired", {
+              description: "Please sign in again to continue.",
+            });
+            router.push("/login");
+            break;
+          }
           const data = await res.json();
           if (!res.ok || !data.ok) {
             const description = data.error || "Could not retrieve a price.";
@@ -217,7 +227,7 @@ export function PosApp() {
       drainingRef.current = false;
       setPending([]);
     }
-  }, [addToCart]);
+  }, [addToCart, router]);
 
   const handleScan = useCallback(() => {
     const raw = scanValue.trim();
