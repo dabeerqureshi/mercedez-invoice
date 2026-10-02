@@ -2,8 +2,8 @@
  * PriceSource interface — port of mercedes_invoice/connectors/base.py.
  *
  * The whole application talks to this interface only, so the rest of the
- * system never cares where the price came from (offline mock, the real
- * Mercedes site via Browserbase, or a future different vendor).
+ * system never cares where the price came from (the real Mercedes site via
+ * Browserbase today, or a different vendor later).
  */
 
 export interface PriceResult {

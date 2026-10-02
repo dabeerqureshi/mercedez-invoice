@@ -1,21 +1,18 @@
 /**
  * Connector factory — port of connectors/__init__.py.
+ *
+ * Always the live Mercedes source: the offline mock was removed, so every
+ * lookup returns real catalog data (or fails loudly when unconfigured).
  */
 export * from "./types";
-export { MockPriceSource } from "./mock";
 export { MercedesPriceSource } from "./mercedes";
 
-import { MockPriceSource } from "./mock";
 import { MercedesPriceSource } from "./mercedes";
 import type { PriceSource } from "./types";
 
-/** Factory used by the app to create the configured price source. */
-export function makeSource(name: string | undefined | null): PriceSource {
-  const key = (name || "mock").toLowerCase();
-  if (key === "mercedes") {
-    return new MercedesPriceSource();
-  }
-  return new MockPriceSource();
+/** Factory used by the app to create the price source. */
+export function makeSource(): PriceSource {
+  return new MercedesPriceSource();
 }
 
 // normalizePart lives in ./types (client-safe); re-exported here so server

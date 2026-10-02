@@ -62,15 +62,15 @@ export class MercedesPriceSource implements PriceSource {
 
   async getPrice(partNumber: string): Promise<PriceResult> {
     if (!isBrowserbaseConfigured()) {
-      throw new LoginRequiredError(
-        "Mercedes live pricing is not configured. Set BROWSERBASE_API_KEY " +
-          "(and BROWSERBASE_PROJECT_ID), or use the mock source with " +
-          "NEXT_PUBLIC_PRICE_SOURCE=mock.",
+      throw new PriceSourceError(
+        "Live Mercedes pricing is not configured. Set BROWSERBASE_API_KEY " +
+          "and BROWSERBASE_PROJECT_ID (.env.local locally, the project " +
+          "environment on Vercel) and try again.",
       );
     }
     // The connection state gates the lookup exactly like the desktop app's
     // login check did: no authenticated session -> honest LoginRequiredError,
-    // never a silent mock price.
+    // never a fabricated price.
     const state = await getSessionState();
     if (!state || state.status !== "connected" || !state.contextId) {
       throw new LoginRequiredError(

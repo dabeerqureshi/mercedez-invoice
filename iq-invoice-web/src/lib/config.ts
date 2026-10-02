@@ -32,14 +32,12 @@ export const VAT_RATE = 0.2; // 20%
 export const DEFAULT_DISCOUNT = 0; // fixed-amount discount on the subtotal (GBP)
 
 /**
- * Price source selector.
- *   "mock"     -> offline deterministic prices (zero-config dev/tests)
- *   "mercedes" -> live Mercedes B2B via Browserbase (Phase 3)
- * Defaults to "mock" so a fresh clone runs with nothing set; set
- * NEXT_PUBLIC_PRICE_SOURCE=mercedes (in .env / Vercel) for live prices.
+ * Price source — always the live Mercedes B2B catalog via Browserbase.
+ * The offline mock source was removed: every lookup returns real data, and
+ * missing credentials or an unauthenticated session fail loudly instead of
+ * serving a fabricated price.
  */
-export const PRICE_SOURCE =
-  (process.env.NEXT_PUBLIC_PRICE_SOURCE as string) || "mock";
+export const PRICE_SOURCE = "mercedes";
 
 /** Which Mercedes price field to use: "list" | "net". */
 export const PRICE_FIELD = (process.env.MERCEDES_PRICE_FIELD as string) || "list";

@@ -11,17 +11,18 @@ Mercedes pricing.
 | Phase | Scope | State |
 | --- | --- | --- |
 | **0 — Scaffold** | Next.js 16 + TS + Tailwind v4 + shadcn-style UI, brand theme, config/money | ✅ Done |
-| **1 — UI + mock pricing** | Scan → cart → checkout (vehicle / work / customer) → totals, mock price source | ✅ Done |
+| **1 — UI + pricing plumbing** | Scan → cart → checkout (vehicle / work / customer) → totals, `PriceSource` interface | ✅ Done |
 | **2 — Save pipeline** | SQLite (libSQL/Turso) + Drizzle, `@react-pdf` invoice, CSV, Vercel Blob (local fallback), SMTP email + Retry | ✅ Done |
 | **3 — Live Mercedes** | Browserbase Context + Live View ("log in once"), Playwright port of `mercedes.py` | ✅ Done |
 | **4 — Hardening** | Scan queue/serialisation, Vercel Cron keep-alive, auth, invoice history | ✅ Done |
 
-Phases 1–2 run **offline with nothing configured**: mock prices, a local SQLite
-file at `.data/`, and invoice files written under `.data/`. No Mercedes login,
-no Browserbase, no cloud accounts required. Phase 3 activates when you set
-`NEXT_PUBLIC_PRICE_SOURCE=mercedes` and Browserbase credentials. Phase 4's
-password gate (`APP_PASSWORD`) and keep-alive cron (`CRON_SECRET`) are
-optional — unset, everything behaves like the open desktop release.
+Phase 2 runs **offline with a zero-config local stack**: a local SQLite file at
+`.data/`, invoice files written under `.data/`, and no cloud accounts for
+storage or email. Price lookups always hit the **live Mercedes catalog** —
+set Browserbase credentials (Phase 3 below) before scanning parts; there is
+no mock/offline price fallback. Phase 4's password gate (`APP_PASSWORD`) and
+keep-alive cron (`CRON_SECRET`) are optional — unset, everything behaves like
+the open desktop release.
 
 ## Quick start
 
@@ -30,10 +31,12 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-Type a part number (e.g. `A0008280388`) and press **Enter** — the mock price
-source returns a deterministic price identical to the Python app. Check out to
-save the invoice (SQLite + PDF + CSV). PDF/CSV download links appear in the
-result panel.
+Type a part number (e.g. `A0008280388`) and press **Enter** — the lookup runs
+against the **real Mercedes catalog** via Browserbase, so `BROWSERBASE_API_KEY`
+/ `BROWSERBASE_PROJECT_ID` and a connected session (see Phase 3 below) are
+required; without them the lookup fails with a clear "not configured" error
+instead of a fake price. Check out to save the invoice (SQLite + PDF + CSV).
+PDF/CSV download links appear in the result panel.
 
 ```bash
 npm run build && npm start   # production build
@@ -67,12 +70,12 @@ SQLite (libSQL)  ->  @react-pdf invoice  ->  CSV  ->  storage  ->  email
 
 - `types.ts` — `PriceSource` interface + `PartNotFoundError` / `LoginRequiredError`
   + `normalizePart()` (client-safe; everything else here is server-only)
-- `mock.ts` — offline deterministic prices (MD5-derived, identical to `mock.py`)
 - `mercedes.ts` — full port of `mercedes.py`, driving a Browserbase cloud
   browser (see the Phase 3 section below)
-- `index.ts` — `makeSource(name)` factory
+- `index.ts` — `makeSource()` factory
 
-Switch sources with `NEXT_PUBLIC_PRICE_SOURCE=mock|mercedes` (see `.env.example`).
+Every lookup uses the live Mercedes source — the offline mock was removed, so
+the app never returns fabricated prices.
 
 ## Live Mercedes pricing (Phase 3)
 
@@ -236,8 +239,9 @@ there. Set these in the project environment before going live:
 - `BLOB_READ_WRITE_TOKEN` — otherwise invoice PDFs/CSVs are lost
 - `APP_PASSWORD` — without it the deployed app is open to anyone with the URL
 - `CRON_SECRET` — so Vercel Cron's `Authorization: Bearer` header is accepted
-- `NEXT_PUBLIC_PRICE_SOURCE=mercedes` + `BROWSERBASE_API_KEY`/`PROJECT_ID` —
-  live pricing (mock source works with none of this)
+- `BROWSERBASE_API_KEY`/`PROJECT_ID` — required for **every** price lookup;
+  without them lookups fail with a clear "not configured" error (no mock/offline
+  price source exists)
 - `SMTP_*` — email; unset, invoices still save and offer **Resend**
 
 Notes: browser-touching routes declare `maxDuration = 60`, which needs Fluid

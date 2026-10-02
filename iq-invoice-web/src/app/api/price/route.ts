@@ -1,15 +1,13 @@
 /**
  * POST /api/price  { partNumber }
  *
- * Live price lookup. Talks only to the configured PriceSource (mock in
- * Phase 1, Mercedes via Browserbase in Phase 3), so the UI never cares which
- * source answered. Errors are categorised exactly like the desktop app:
+ * Live price lookup — always the real Mercedes catalog via Browserbase.
+ * Errors are categorised exactly like the desktop app:
  *   kind = "login_required" | "not_found" | "error"
  */
 import { NextResponse } from "next/server";
 
 import { guardRequest } from "@/lib/auth";
-import { PRICE_SOURCE } from "@/lib/config";
 import {
   LoginRequiredError,
   PartNotFoundError,
@@ -45,7 +43,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const source = makeSource(PRICE_SOURCE);
+  const source = makeSource();
   try {
     const result = await source.getPrice(part);
     return NextResponse.json({ ok: true, result });
